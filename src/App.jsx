@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef } from "react";
+import { supabase } from "./supabase";
+import Auth from "./Auth";
 
 const C = {
   bg:'#07101A', card:'#0E1C2E', card2:'#162437',
@@ -881,11 +883,21 @@ function Tracker({goals,products,setProducts,lang,setLang,onRecalculate,onResetA
 // ─────────────────────── APP ───────────────────────
 export default function App(){
   const[screen,setScreen]=useState('loading');
+  const[user,setUser]=useState(null);
   const[profile,setProfile]=useState(null);
   const[goals,setGoals]=useState(null);
   const[products,setProducts]=useState(DEFAULT_PRODUCTS);
   const[lang,setLang]=useState('en');
 
+  useEffect(()=>{
+    supabase.auth.getSession().then(({data:{session}})=>{
+      setUser(session?.user??null);
+    });
+    const{data:{subscription}}=supabase.auth.onAuthStateChange((_,session)=>{
+      setUser(session?.user??null);
+    });
+    return()=>subscription.unsubscribe();
+  },[]);
   // Load font
   useEffect(()=>{
     const link=document.createElement('link');
@@ -934,6 +946,8 @@ export default function App(){
   }
 
   const t=TR[lang];
+
+  if(!user)return<Auth onAuth={setUser}/>;
 
   if(screen==='loading')return(
     <div style={{minHeight:'100vh',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',background:C.bg,gap:16}}>
