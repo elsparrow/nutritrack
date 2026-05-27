@@ -15,6 +15,51 @@ async function getUserId() {
   return user?.id;
 }
 
+async function loadSharedProducts() {
+  try {
+    const { data } = await supabase.from('shared_products').select('*');
+    return (data || []).map(p => ({
+      id: p.id,
+      name: p.name,
+      nameHe: p.name_he || '',
+      calories: p.calories || 0,
+      protein: p.protein || 0,
+      carbs: p.carbs || 0,
+      fats: p.fats || 0,
+      shared: true,
+    }));
+  } catch(e) { return []; }
+}
+
+async function saveSharedProduct(product) {
+  try {
+    const userId = await getUserId();
+    const { data, error } = await supabase.from('shared_products').insert({
+      name: product.name,
+      name_he: product.nameHe || '',
+      calories: product.calories || 0,
+      protein: product.protein || 0,
+      carbs: product.carbs || 0,
+      fats: product.fats || 0,
+      added_by: userId,
+    }).select().single();
+    return data;
+  } catch(e) { return null; }
+}
+
+async function updateSharedProduct(id, product) {
+  try {
+    await supabase.from('shared_products').update({
+      name: product.name,
+      name_he: product.nameHe || '',
+      calories: product.calories || 0,
+      protein: product.protein || 0,
+      carbs: product.carbs || 0,
+      fats: product.fats || 0,
+    }).eq('id', id);
+  } catch(e) {}
+}
+
 async function getSettings(userId) {
   const { data } = await supabase.from('settings').select('data').eq('user_id', userId).single();
   return data?.data || {};
@@ -364,17 +409,26 @@ function ProductsPanel({products,setProducts,onClose,lang}){
   const filtered=products.filter(p=>p.name.toLowerCase().includes(filter.toLowerCase())||(p.nameHe||'').includes(filter));
 
   function startEdit(p){const idx=products.indexOf(p);setEditId(idx);setEditForm({...p});}
-  function saveEdit(){
-    setProducts(prev=>prev.map((p,i)=>i===editId?{name:editForm.name||p.name,nameHe:editForm.nameHe||'',protein:+editForm.protein||0,carbs:+editForm.carbs||0,fats:+editForm.fats||0,calories:+editForm.calories||0}:p));
-    setEditId(null);
+
+  async function saveEdit(){
+   const p=products[editId];
+   const updated={name:editForm.name||p.name,nameHe:editForm.nameHe||'',protein:+editForm.protein||0,carbs:+editForm.carbs||0,fats:+editForm.fats||0,calories:+editForm.calories||0};
+   if(p.shared&&p.id){await updateSharedProduct(p.id,updated);}
+   setProducts(prev=>prev.map((x,i)=>i===editId?{...x,...updated}:x));
+   setEditId(null);
   }
   function deleteProduct(p){setProducts(prev=>prev.filter(x=>x!==p));setEditId(null);}
-  function addProduct(){
-    if(!addForm.name.trim()&&!addForm.nameHe.trim())return;
-    setProducts(prev=>[...prev,{name:addForm.name.trim()||addForm.nameHe.trim(),nameHe:addForm.nameHe.trim(),protein:+addForm.protein||0,carbs:+addForm.carbs||0,fats:+addForm.fats||0,calories:+addForm.calories||0}]);
-    setAddForm({name:'',nameHe:'',protein:'',carbs:'',fats:'',calories:''});
-    setShowAdd(false);
-  }
+
+ async function addProduct(){
+   if(!addForm.name.trim()&&!addForm.nameHe.trim())return;
+   const newProduct={name:addForm.name.trim()||addForm.nameHe.trim(),nameHe:addForm.nameHe.trim(),protein:+addForm.protein||0,carbs:+addForm.carbs||0,fats:+addForm.fats||0,calories:+addForm.calories||0};
+   const saved=await saveSharedProduct(newProduct);
+   if(saved)newProduct.id=saved.id;
+   newProduct.shared=true;
+   setProducts(prev=>[...prev,newProduct]);
+   setAddForm({name:'',nameHe:'',protein:'',carbs:'',fats:'',calories:''});
+   setShowAdd(false);
+ }
 
   return(
     <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.82)',display:'flex',alignItems:'flex-end',justifyContent:'center',zIndex:300}}>
@@ -1049,18 +1103,20 @@ export default function App(){
 
   // Load all persisted state on mount
   useEffect(()=>{
-    async function init(){
-      const[prof,g,prods,lng]=await Promise.all([
-        storageLoad('profile'),storageLoad('goals'),
-        storageLoad('products'),storageLoad('lang'),
-      ]);
-      if(lng)setLang(lng);
-      if(prods)setProducts(prods);
-      if(prof&&g){setProfile(prof);setGoals(g);setScreen('tracker');}
-      else setScreen('onboarding');
-    }
-    init();
-  },[]);
+      async function init(){
+        const[prof,g,prods,lng,shared]=await Promise.all([
+          storageLoad('profile'),storageLoad('goals'),
+          storageLoad('products'),storageLoad('lang'),
+          loadSharedProducts(),
+        ]);
+        if(lng)setLang(lng);
+        const merged=[...DEFAULT_PRODUCTS,...shared,...(prods||[]).filter(p=>!p.shared)];
+        setProducts(merged);
+        if(prof&&g){setProfile(prof);setGoals(g);setScreen('tracker');}
+        else setScreen('onboarding');
+      }
+      init();
+    },[]);
 
   // Persist state changes
   useEffect(()=>{if(profile)storageSave('profile',profile);},[profile]);
