@@ -10,19 +10,98 @@ const C = {
 };
 
 // ─── Storage helpers ───
+async function getUserId() {
+  const { data: { user } } = await supabase.auth.getUser();
+  return user?.id;
+}
+
+async function getSettings(userId) {
+  const { data } = await supabase.from('settings').select('data').eq('user_id', userId).single();
+  return data?.data || {};
+}
+
 async function storageSave(key, value) {
-  try { await window.storage.set(key, JSON.stringify(value)); } catch(e) {}
+  try {
+    const userId = await getUserId();
+    if (!userId) return;
+    if (key.startsWith('log:')) {
+      const date = key.replace('log:', '');
+      await supabase.from('daily_logs').delete().eq('user_id', userId).eq('log_date', date);
+      if (value && value.length > 0) {
+        await supabase.from('daily_logs').insert(
+          value.map(item => ({
+            user_id: userId,
+            log_date: date,
+            food_name: item.name,
+            food_name_he: item.nameHe || '',
+            amount: item.amount,
+            calories: item.calories || 0,
+            protein: item.protein || 0,
+            carbs: item.carbs || 0,
+            fats: item.fats || 0,
+          }))
+        );
+      }
+    } else {
+      const settings = await getSettings(userId);
+      settings[key] = value;
+      await supabase.from('settings').upsert({ user_id: userId, data: settings, updated_at: new Date().toISOString() });
+    }
+  } catch(e) { console.error('storageSave error:', e); }
 }
+
 async function storageLoad(key) {
-  try { const r = await window.storage.get(key); return r ? JSON.parse(r.value) : null; }
-  catch(e) { return null; }
+  try {
+    const userId = await getUserId();
+    if (!userId) return null;
+    if (key.startsWith('log:')) {
+      const date = key.replace('log:', '');
+      const { data } = await supabase.from('daily_logs').select('*').eq('user_id', userId).eq('log_date', date);
+      return (data || []).map(row => ({
+        id: row.id,
+        name: row.food_name,
+        nameHe: row.food_name_he,
+        amount: Number(row.amount),
+        calories: row.calories,
+        protein: row.protein,
+        carbs: row.carbs,
+        fats: row.fats,
+      }));
+    } else {
+      const settings = await getSettings(userId);
+      return settings[key] || null;
+    }
+  } catch(e) { return null; }
 }
+
 async function storageDelete(key) {
-  try { await window.storage.delete(key); } catch(e) {}
+  try {
+    const userId = await getUserId();
+    if (!userId) return;
+    if (key.startsWith('log:')) {
+      const date = key.replace('log:', '');
+      await supabase.from('daily_logs').delete().eq('user_id', userId).eq('log_date', date);
+    } else {
+      const settings = await getSettings(userId);
+      delete settings[key];
+      await supabase.from('settings').upsert({ user_id: userId, data: settings, updated_at: new Date().toISOString() });
+    }
+  } catch(e) {}
 }
+
 async function storageListKeys(prefix) {
-  try { const r = await window.storage.list(prefix); return r ? r.keys : []; }
-  catch(e) { return []; }
+  try {
+    const userId = await getUserId();
+    if (!userId) return [];
+    if (prefix === 'log:') {
+      const { data } = await supabase.from('daily_logs').select('log_date').eq('user_id', userId);
+      const dates = [...new Set((data || []).map(r => r.log_date))];
+      return dates.map(d => `log:${d}`);
+    } else {
+      const settings = await getSettings(userId);
+      return Object.keys(settings).filter(k => k.startsWith(prefix));
+    }
+  } catch(e) { return []; }
 }
 
 // ─── Export / Import ───
@@ -540,7 +619,7 @@ JSON only: {"bmr":N,"tdee":N,"goalCalories":N,"protein":N,"carbs":N,"fats":N,"me
 }
 
 // ─────────────────────── TRACKER ───────────────────────
-function Tracker({goals,products,setProducts,lang,setLang,onRecalculate,onResetAll,onImport}){
+function Tracker({goals,products,setProducts,lang,setLang,onRecalculate,onResetAll,onImport,onSignOut}){
   const t=TR[lang];
   const rtl=lang==='he';
   const iconSide=rtl?'right':'left';
@@ -867,6 +946,10 @@ function Tracker({goals,products,setProducts,lang,setLang,onRecalculate,onResetA
               style={{width:'100%',padding:'12px',borderRadius:11,background:C.card2,border:`1px solid ${C.border}`,color:C.text,fontSize:14,fontFamily:'Heebo',fontWeight:500,cursor:'pointer',marginBottom:8,textAlign:'left',display:'flex',alignItems:'center',gap:10}}>
               <span style={{fontSize:18}}>🔄</span>{t.recalcBtn}
             </button>
+            <button onClick={()=>{setShowSettings(false);onSignOut();}}
+              style={{width:'100%',padding:'12px',borderRadius:11,background:C.card2,border:`1px solid ${C.border}`,color:C.muted,fontSize:14,fontFamily:'Heebo',fontWeight:500,cursor:'pointer',marginBottom:8,textAlign:'left',display:'flex',alignItems:'center',gap:10}}>
+              <span style={{fontSize:18}}>🚪</span>Log Out
+            </button>
             <button onClick={()=>{if(window.confirm(t.resetConfirm)){setShowSettings(false);onResetAll();}}}
               style={{width:'100%',padding:'12px',borderRadius:11,background:`${C.fats}14`,border:`1px solid ${C.fats}30`,color:C.fats,fontSize:14,fontFamily:'Heebo',fontWeight:500,cursor:'pointer',textAlign:'left',display:'flex',alignItems:'center',gap:10}}>
               <span style={{fontSize:18}}>🗑️</span>{t.resetBtn}
@@ -974,6 +1057,7 @@ export default function App(){
       {screen==='tracker'&&<Tracker goals={goals} products={products} setProducts={setProducts} lang={lang} setLang={setLang}
         onRecalculate={()=>{setGoals(null);setScreen('onboarding');}}
         onResetAll={handleResetAll}
+        onSignOut={async()=>{await supabase.auth.signOut();setUser(null);}}
         onImport={handleImport}/>}
     </div>
   );
