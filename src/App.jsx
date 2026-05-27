@@ -484,6 +484,61 @@ function ProductsPanel({products,setProducts,onClose,lang}){
   );
 }
 
+// ─────────────────────── CALENDAR ───────────────────────
+function CalendarModal({onSelectDate,onClose,lang}){
+  const[viewDate,setViewDate]=useState(new Date());
+  const[loggedDates,setLoggedDates]=useState(new Set());
+  useEffect(()=>{loadMonthLogs();},[viewDate]);
+  async function loadMonthLogs(){
+    const userId=await getUserId();
+    if(!userId)return;
+    const year=viewDate.getFullYear(),month=viewDate.getMonth();
+    const start=`${year}-${String(month+1).padStart(2,'0')}-01`;
+    const end=`${year}-${String(month+1).padStart(2,'0')}-31`;
+    const{data}=await supabase.from('daily_logs').select('log_date').eq('user_id',userId).gte('log_date',start).lte('log_date',end);
+    setLoggedDates(new Set((data||[]).map(r=>r.log_date)));
+  }
+  const year=viewDate.getFullYear(),month=viewDate.getMonth();
+  const firstDay=new Date(year,month,1).getDay();
+  const daysInMonth=new Date(year,month+1,0).getDate();
+  const todayStr=dateStr(new Date());
+  const monthName=viewDate.toLocaleDateString(lang==='he'?'he-IL':'en-GB',{month:'long',year:'numeric'});
+  const cells=[];
+  for(let i=0;i<firstDay;i++)cells.push(null);
+  for(let d=1;d<=daysInMonth;d++)cells.push(d);
+  return(
+    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.82)',display:'flex',alignItems:'flex-end',justifyContent:'center',zIndex:300}}>
+      <div style={{background:C.card,borderRadius:'22px 22px 0 0',width:'100%',maxWidth:540,border:`1px solid ${C.border}`,boxShadow:'0 -32px 80px rgba(0,0,0,0.6)',padding:'20px 20px 36px'}}>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:20}}>
+          <button onClick={()=>setViewDate(d=>new Date(d.getFullYear(),d.getMonth()-1,1))} style={{background:'none',border:'none',color:C.muted,fontSize:22,cursor:'pointer'}}>‹</button>
+          <span style={{color:C.text,fontFamily:'Heebo',fontWeight:600,fontSize:15}}>{monthName}</span>
+          <button onClick={()=>setViewDate(d=>new Date(d.getFullYear(),d.getMonth()+1,1))} style={{background:'none',border:'none',color:C.muted,fontSize:22,cursor:'pointer'}}>›</button>
+        </div>
+        <div style={{display:'grid',gridTemplateColumns:'repeat(7,1fr)',gap:4,marginBottom:8}}>
+          {['Su','Mo','Tu','We','Th','Fr','Sa'].map(d=>(
+            <div key={d} style={{textAlign:'center',color:C.muted,fontSize:11,fontFamily:'Heebo'}}>{d}</div>
+          ))}
+        </div>
+        <div style={{display:'grid',gridTemplateColumns:'repeat(7,1fr)',gap:4}}>
+          {cells.map((day,i)=>{
+            if(!day)return<div key={i}/>;
+            const ds=`${year}-${String(month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+            const isToday=ds===todayStr,hasLog=loggedDates.has(ds),isFuture=ds>todayStr;
+            return(
+              <button key={i} onClick={()=>{if(!isFuture){onSelectDate(new Date(ds));onClose();}}}
+                style={{padding:'8px 4px',borderRadius:10,border:`1px solid ${isToday?C.accent:hasLog?C.protein+'44':C.border}`,background:isToday?`${C.accent}22`:hasLog?`${C.protein}11`:'transparent',color:isFuture?C.border:isToday?C.accent:C.text,fontFamily:'Heebo',fontSize:13,cursor:isFuture?'default':'pointer',display:'flex',flexDirection:'column',alignItems:'center',gap:3}}>
+                {day}
+                {hasLog&&<div style={{width:4,height:4,borderRadius:'50%',background:C.protein}}/>}
+              </button>
+            );
+          })}
+        </div>
+        <button onClick={onClose} style={{width:'100%',marginTop:20,padding:'12px',borderRadius:12,background:C.card2,border:`1px solid ${C.border}`,color:C.muted,fontFamily:'Heebo',fontSize:14,cursor:'pointer'}}>Close</button>
+      </div>
+    </div>
+  );
+}
+
 // ─────────────────────── ONBOARDING ───────────────────────
 function Onboarding({onSubmit,lang,setLang}){
   const t=TR[lang];
@@ -635,6 +690,7 @@ function Tracker({goals,products,setProducts,lang,setLang,onRecalculate,onResetA
   const[showCustom,setShowCustom]=useState(false);
   const[showProducts,setShowProducts]=useState(false);
   const[showSettings,setShowSettings]=useState(false);
+  const[showCalendar,setShowCalendar]=useState(false);
   const[custom,setCustom]=useState({name:'',nameHe:'',protein:'',carbs:'',fats:'',calories:''});
   const[dropOpen,setDropOpen]=useState(false);
   const[hovIdx,setHovIdx]=useState(-1);
@@ -707,6 +763,7 @@ function Tracker({goals,products,setProducts,lang,setLang,onRecalculate,onResetA
           </div>
           <div style={{display:'flex',alignItems:'flex-start',gap:7,flexShrink:0}}>
             <button onClick={()=>setShowProducts(true)} style={{padding:'6px 10px',borderRadius:9,background:C.card,border:`1px solid ${C.border}`,color:C.muted,fontSize:11,fontFamily:'Heebo',fontWeight:600,cursor:'pointer'}}>{t.productsBtn}</button>
+            <button onClick={()=>setShowCalendar(true)} style={{padding:'6px 10px',borderRadius:9,background:C.card,border:`1px solid ${C.border}`,color:C.muted,fontSize:11,fontFamily:'Heebo',fontWeight:600,cursor:'pointer'}}>📅</button>
             <LangToggle lang={lang} setLang={setLang}/>
             <button onClick={()=>setShowSettings(true)} style={{width:30,height:30,borderRadius:8,background:C.card,border:`1px solid ${C.border}`,color:C.muted,fontSize:15,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center'}}>⚙</button>
             <div style={{textAlign:'right'}}>
@@ -959,6 +1016,7 @@ function Tracker({goals,products,setProducts,lang,setLang,onRecalculate,onResetA
       )}
 
       {showProducts&&<ProductsPanel products={products} setProducts={setProducts} onClose={()=>setShowProducts(false)} lang={lang}/>}
+      {showCalendar&&<CalendarModal onSelectDate={setCurrentDate} onClose={()=>setShowCalendar(false)} lang={lang}/>}
     </div>
   );
 }
